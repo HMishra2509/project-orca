@@ -2,6 +2,7 @@ import os
 import requests
 import streamlit as st
 import cv2
+import time
 import glob
 import random
 import numpy as np
@@ -10,6 +11,9 @@ import math
 import torch
 import torch.nn as nn
 import folium
+import asyncio
+import websockets
+import json
 from streamlit_folium import st_folium
 from dotenv import load_dotenv
 from supabase import create_client
@@ -72,6 +76,8 @@ button[data-testid="baseButton-headerNoPadding"],
     .mono, div[data-testid="stMetricValue"], .stDataFrame, code {
         font-family: 'JetBrains Mono', monospace !important;
     }
+
+    
 
     /* ---- HEADER ---- */
     .main-header {
@@ -223,16 +229,73 @@ button[data-testid="baseButton-headerNoPadding"],
     }
 </style>
 """, unsafe_allow_html=True)
+# ---------------- BOOT SEQUENCE (plays once per session) ----------------
+if "booted" not in st.session_state:
+    st.session_state.booted = False
 
+if not st.session_state.booted:
+    boot_placeholder = st.empty()
 
+    boot_messages = [
+        "INITIALIZING ORCA SYSTEM...",
+        "ESTABLISHING SATELLITE UPLINK...",
+        "LOADING AI DETECTION MODEL (U-NET)...",
+        "SYNCING LIVE OCEAN & WIND DATA FEED...",
+        "LOADING AIS VESSEL REGISTRY...",
+        "CALIBRATING ATTRIBUTION ENGINE...",
+        "SYSTEM READY."
+    ]
+
+    for i, msg in enumerate(boot_messages):
+        progress = int(((i + 1) / len(boot_messages)) * 100)
+        boot_placeholder.markdown(f"""
+        <div style="text-align:center; padding-top:8rem;">
+            <div style="font-size:6rem; margin-bottom:1rem; filter: drop-shadow(0 0 20px #00FF9C);">
+                🚢
+            </div>
+            <div style="font-family:'Space Grotesk', sans-serif; color:white; font-size:1.8rem; font-weight:700; letter-spacing:2px;">
+                PROJECT ORCA
+            </div>
+            <div style="font-family:'JetBrains Mono', monospace; color:#00FF9C; font-size:0.9rem; letter-spacing:2px; margin:1.5rem 0 1rem 0;">
+                {msg}
+            </div>
+            <div style="width:400px; max-width:80%; margin:0 auto; background:#121A23; border:1px solid rgba(0,255,156,0.2); border-radius:20px; overflow:hidden; height:14px;">
+                <div style="width:{progress}%; height:100%; background:linear-gradient(90deg, #00FF9C, #007A85); transition: width 0.3s;"></div>
+            </div>
+            <div style="font-family:'JetBrains Mono', monospace; color:#6B8A82; font-size:0.8rem; margin-top:0.5rem;">
+                {progress}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        time.sleep(0.5)
+
+    st.session_state.booted = True
+    boot_placeholder.empty()
+    st.rerun()
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = f"ORC-{random.randint(1000,9999)}-{random.randint(100,999)}"
+
+import datetime
+sync_time = datetime.datetime.utcnow().strftime("%H:%M:%S UTC")
 # ---------------- HEADER ----------------
-st.markdown("""
-<div class="main-header">
-    <h1>🐋 Project ORCA</h1>
-    <p><span class="live-dot"></span>LIVE SURVEILLANCE FEED &nbsp;//&nbsp; DETECT · TRACE · ATTRIBUTE &nbsp;//&nbsp; NTRO SIH26143</p>
-</div>
-""", unsafe_allow_html=True)
-
+header_html = (
+    f'<div class="main-header" style="display:flex; justify-content:space-between; align-items:center; position:relative;">'
+    f'<div style="position:absolute; top:-1px; left:-1px; width:18px; height:18px; border-top:2px solid #00FF9C; border-left:2px solid #00FF9C;"></div>'
+    f'<div style="position:absolute; bottom:-1px; right:-1px; width:18px; height:18px; border-bottom:2px solid #00FF9C; border-right:2px solid #00FF9C;"></div>'
+    f'<div>'
+    f'<h1>&#128011; Project ORCA</h1>'
+    f'<p><span class="live-dot"></span>LIVE SURVEILLANCE FEED &nbsp;//&nbsp; DETECT &middot; TRACE &middot; ATTRIBUTE &nbsp;//&nbsp; NTRO SIH26143</p>'
+    f'</div>'
+    f'<div style="text-align:right; font-family:\'JetBrains Mono\', monospace; font-size:0.7rem; color:#6B8A82; line-height:1.8;">'
+    f'<div>SYSTEM STATUS: <span style="color:#00FF9C; font-weight:700;">ONLINE</span></div>'
+    f'<div>SESSION: <span style="color:#00FF9C; font-weight:700;">{st.session_state.session_id}</span></div>'
+    f'<div>LAST SYNC: <span style="color:#00FF9C; font-weight:700;">{sync_time}</span></div>'
+    f'<div>CLEARANCE: <span style="color:#FFB020; font-weight:700;">RESTRICTED</span></div>'
+    f'</div>'
+    f'</div>'
+)
+st.markdown(header_html, unsafe_allow_html=True)
 
 # ---------------- U-NET MODEL DEFINITION ----------------
 class DoubleConv(nn.Module):
@@ -514,6 +577,39 @@ def check_repeat_offender(mmsi):
         return len(result.data)
     except Exception:
         return 0
+
+def render_mission_tracker(placeholder, current_stage):
+    stages = ["SCAN", "DETECT", "TRACE", "ATTRIBUTE", "COMPLETE"]
+    stage_index = stages.index(current_stage)
+
+    items_html = ""
+    for i, stage in enumerate(stages):
+        if i < stage_index:
+            color, icon, opacity = "#00FF9C", "&#10003;", "1"
+        elif i == stage_index:
+            color, icon, opacity = "#00FF9C", "&#9679;", "1"
+        else:
+            color, icon, opacity = "#3A4A52", "&#9675;", "0.5"
+
+        glow = "text-shadow: 0 0 10px #00FF9C;" if i <= stage_index else ""
+        items_html += (
+            f'<div style="display:flex; flex-direction:column; align-items:center; opacity:{opacity};">'
+            f'<div style="font-size:1.5rem; color:{color}; {glow}">{icon}</div>'
+            f'<div style="font-family:\'JetBrains Mono\', monospace; font-size:0.7rem; color:{color}; letter-spacing:1px; margin-top:0.3rem;">{stage}</div>'
+            f'</div>'
+        )
+        if i < len(stages) - 1:
+            line_color = "#00FF9C" if i < stage_index else "#3A4A52"
+            items_html += f'<div style="flex:1; height:2px; background:{line_color}; margin-top:0.75rem;"></div>'
+
+    html = (
+        f'<div style="display:flex; align-items:flex-start; justify-content:space-between; '
+        f'background:#0D131A; border:1px solid rgba(0,255,156,0.15); border-radius:8px; '
+        f'padding:1.2rem 2rem; margin-bottom:1.5rem;">'
+        f'{items_html}'
+        f'</div>'
+    )
+    placeholder.markdown(html, unsafe_allow_html=True)
         
 def save_pipeline_results(spill_lat, spill_lon, area_km2, source_image, ranked_vessels_df):
     try:
@@ -599,6 +695,9 @@ st.sidebar.caption("Vessel identity data: Real AIS records (MMSI, type, speed)")
 
 # ---------------- MAIN DASHBOARD ----------------
 if run_button:
+    tracker_placeholder = st.empty()
+    render_mission_tracker(tracker_placeholder, "SCAN")
+    time.sleep(0.4)
 
     # ---- ENGINE 1 ----
     st.markdown('<div class="engine-card"><h3>🛰️ Engine 1 — Detection & Characterization</h3></div>', unsafe_allow_html=True)
@@ -646,6 +745,7 @@ if run_button:
     ranked['prior_incidents'] = ranked['mmsi'].apply(check_repeat_offender)
 
     # ---- ENGINE 2 ----
+    render_mission_tracker(tracker_placeholder, "TRACE")
     st.markdown('<div class="engine-card"><h3>🌊 Engine 2 — Hindcast & Forecast (Live Data)</h3></div>', unsafe_allow_html=True)
 
     env_data = get_ocean_wind_data(spill_lat, spill_lon)
@@ -703,6 +803,7 @@ if run_button:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ---- ENGINE 3 ----
+    render_mission_tracker(tracker_placeholder, "ATTRIBUTE")
     st.markdown('<div class="engine-card"><h3>🚢 Engine 3 — Vessel Attribution (Real AIS Vessel Data)</h3></div>', unsafe_allow_html=True)
     st.caption("Vessel identity (MMSI, type, speed, dimensions) from real historic AIS records. "
                "Positions are representative for demonstration — full historical position-tracking "
@@ -722,6 +823,42 @@ if run_button:
             "prior_incidents": "Prior Incidents Flagged",
         }
     )
+    st.markdown("#### 🔍 Score Breakdown by Vessel")
+
+    vessel_list = ranked.to_dict('records')
+    for i in range(0, len(vessel_list), 2):
+        pair = vessel_list[i:i+2]
+        cols = st.columns(2)
+        for col, v in zip(cols, pair):
+            distance_pts = 35 if v['distance_from_spill_km'] <= 5 else (20 if v['distance_from_spill_km'] <= 10 else (10 if v['distance_from_spill_km'] <= 20 else 0))
+            gap_pts = 30 if v['ais_signal_gap'] else 0
+            traj_pts = round(v['trajectory_match'] * 25, 1)
+            type_pts = 10 if v['ship_type'] == "Tanker" else (5 if v['ship_type'] == "Cargo" else 0)
+            total = v['suspect_score']
+
+            with col:
+                card_html = (
+                    f'<div style="background:#0D131A; border:1px solid rgba(0,255,156,0.15); border-radius:8px; padding:1rem 1.2rem; margin-bottom:1rem;">'
+                    f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">'
+                    f'<span style="font-family:\'JetBrains Mono\', monospace; color:#DCEDE7; font-weight:600;">MMSI {v["mmsi"]}</span>'
+                    f'<span style="font-family:\'JetBrains Mono\', monospace; color:#00FF9C; font-weight:700; font-size:1.1rem;">{total}/100</span>'
+                    f'</div>'
+                    f'<div style="color:#6B8A82; font-size:0.75rem; margin-bottom:0.6rem;">{v["ship_type"]} &nbsp;\u2022&nbsp; {v["risk_label"]}</div>'
+                    f'<div style="display:flex; height:16px; border-radius:4px; overflow:hidden; margin-bottom:0.5rem;">'
+                    f'<div style="width:{distance_pts}%; background:#00FF9C;"></div>'
+                    f'<div style="width:{gap_pts}%; background:#FFB020;"></div>'
+                    f'<div style="width:{traj_pts}%; background:#0074D9;"></div>'
+                    f'<div style="width:{type_pts}%; background:#9D4EDD;"></div>'
+                    f'</div>'
+                    f'<div style="display:flex; flex-wrap:wrap; gap:0.8rem; font-family:\'JetBrains Mono\', monospace; font-size:0.7rem;">'
+                    f'<span style="color:#00FF9C;">\u25a0 Proximity {distance_pts}</span>'
+                    f'<span style="color:#FFB020;">\u25a0 AIS Gap {gap_pts}</span>'
+                    f'<span style="color:#0074D9;">\u25a0 Trajectory {traj_pts}</span>'
+                    f'<span style="color:#9D4EDD;">\u25a0 Type {type_pts}</span>'
+                    f'</div>'
+                    f'</div>'
+                )
+                st.markdown(card_html, unsafe_allow_html=True)
 
     top = ranked.iloc[0]
     st.error(f"🚨 **Top Suspect Vessel: MMSI {top['mmsi']}** ({top['ship_type']}) — {top['risk_label']} — Suspect Score: {top['suspect_score']} / 100")
@@ -743,6 +880,7 @@ if run_button:
         st.success(f"✅ Results saved to database (Spill ID: {result})")
     else:
         st.warning(f"⚠️ Database save failed: {result}")
+    render_mission_tracker(tracker_placeholder, "COMPLETE")
 
 else:
     st.markdown("""
