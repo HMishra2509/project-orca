@@ -8,7 +8,9 @@ import random
 import numpy as np
 import pandas as pd
 import math
+import altair as alt
 import torch
+import base64
 import torch.nn as nn
 import folium
 import asyncio
@@ -24,7 +26,10 @@ supabase = create_client(
     os.environ.get("SUPABASE_URL"),
     os.environ.get("SUPABASE_KEY")
 )
-
+def get_image_base64(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
 st.set_page_config(page_title="Project ORCA", page_icon="🐋", layout="wide")
 
 # ---------------- CUSTOM STYLING (ORCA BRAND) ----------------
@@ -229,46 +234,65 @@ button[data-testid="baseButton-headerNoPadding"],
     }
 </style>
 """, unsafe_allow_html=True)
-# ---------------- BOOT SEQUENCE (plays once per session) ----------------
+# ---------------- BOOT SEQUENCE (full-screen image, plays once per session) ----------------
 if "booted" not in st.session_state:
     st.session_state.booted = False
 
 if not st.session_state.booted:
     boot_placeholder = st.empty()
+    boot_img_b64 = get_image_base64("assets/loading_ship.png")
+    BOOT_DURATION = 3.5  # seconds — change this to speed up/slow down
 
-    boot_messages = [
-        "INITIALIZING ORCA SYSTEM...",
-        "ESTABLISHING SATELLITE UPLINK...",
-        "LOADING AI DETECTION MODEL (U-NET)...",
-        "SYNCING LIVE OCEAN & WIND DATA FEED...",
-        "LOADING AIS VESSEL REGISTRY...",
-        "CALIBRATING ATTRIBUTION ENGINE...",
-        "SYSTEM READY."
-    ]
+    boot_placeholder.markdown(f"""
+    <style>
+        [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{ visibility: hidden; }}
 
-    for i, msg in enumerate(boot_messages):
-        progress = int(((i + 1) / len(boot_messages)) * 100)
-        boot_placeholder.markdown(f"""
-        <div style="text-align:center; padding-top:8rem;">
-            <div style="font-size:6rem; margin-bottom:1rem; filter: drop-shadow(0 0 20px #00FF9C);">
-                🚢
-            </div>
-            <div style="font-family:'Space Grotesk', sans-serif; color:white; font-size:1.8rem; font-weight:700; letter-spacing:2px;">
-                PROJECT ORCA
-            </div>
-            <div style="font-family:'JetBrains Mono', monospace; color:#00FF9C; font-size:0.9rem; letter-spacing:2px; margin:1.5rem 0 1rem 0;">
-                {msg}
-            </div>
-            <div style="width:400px; max-width:80%; margin:0 auto; background:#121A23; border:1px solid rgba(0,255,156,0.2); border-radius:20px; overflow:hidden; height:14px;">
-                <div style="width:{progress}%; height:100%; background:linear-gradient(90deg, #00FF9C, #007A85); transition: width 0.3s;"></div>
-            </div>
-            <div style="font-family:'JetBrains Mono', monospace; color:#6B8A82; font-size:0.8rem; margin-top:0.5rem;">
-                {progress}%
-            </div>
+        @keyframes fillBar {{
+            from {{ width: 0%; }}
+            to {{ width: 100%; }}
+        }}
+        @keyframes cycleText {{
+            0%   {{ content: "INITIALIZING ORCA SYSTEM..."; }}
+        }}
+        #boot-bar-fill {{
+            animation: fillBar {BOOT_DURATION}s linear forwards;
+        }}
+        #boot-msg::after {{
+            content: "INITIALIZING ORCA SYSTEM...";
+            animation: msgSwap {BOOT_DURATION}s steps(1) forwards;
+        }}
+        @keyframes msgSwap {{
+            0%   {{ content: "INITIALIZING ORCA SYSTEM..."; }}
+            15%  {{ content: "ESTABLISHING SATELLITE UPLINK..."; }}
+            30%  {{ content: "LOADING AI DETECTION MODEL (U-NET)..."; }}
+            50%  {{ content: "SYNCING LIVE OCEAN & WIND DATA FEED..."; }}
+            68%  {{ content: "LOADING AIS VESSEL REGISTRY..."; }}
+            85%  {{ content: "CALIBRATING ATTRIBUTION ENGINE..."; }}
+            97%  {{ content: "SYSTEM READY."; }}
+        }}
+    </style>
+    <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:99999;
+                background: linear-gradient(rgba(5,7,10,0.45), rgba(5,7,10,0.9)),
+                            url('data:image/jpeg;base64,{boot_img_b64}');
+                background-size:cover; background-position:center;
+                display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
+                padding-bottom:9vh;">
+        <div style="font-family:'Space Grotesk', sans-serif; color:white; font-size:2rem; font-weight:700;
+                    letter-spacing:3px; margin-bottom:0.8rem; text-shadow:0 0 20px rgba(0,0,0,0.8);">
+            PROJECT ORCA
         </div>
-        """, unsafe_allow_html=True)
-        time.sleep(0.5)
+        <div id="boot-msg" style="font-family:'JetBrains Mono', monospace; color:#00FF9C; font-size:0.9rem;
+                    letter-spacing:2px; margin-bottom:1.2rem; text-shadow:0 0 10px rgba(0,255,156,0.5);">
+        </div>
+        <div style="width:380px; max-width:80%; background:rgba(255,255,255,0.08);
+                    border:1px solid rgba(0,255,156,0.4); border-radius:20px; overflow:hidden; height:12px;">
+            <div id="boot-bar-fill" style="height:100%; background:linear-gradient(90deg, #00FF9C, #007A85);
+                        box-shadow:0 0 12px #00FF9C; width:0%;"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
+    time.sleep(BOOT_DURATION)
     st.session_state.booted = True
     boot_placeholder.empty()
     st.rerun()
@@ -372,6 +396,16 @@ def load_ais_data():
 
 
 ais_source_df = load_ais_data()
+
+def get_vessel_image_path(ship_type):
+    mapping = {
+        "Tanker": "ship_images/tanker.jpg",
+        "Cargo": "ship_images/cargo.jpg",
+        "Fishing": "ship_images/fishing.jpg",
+        "Pleasure": "ship_images/pleasure.jpg",
+        "Port tender": "ship_images/port_tender.jpg"
+    }
+    return mapping.get(ship_type, "ship_images/cargo.jpg")
 
 
 # ---------------- ENGINE 1: AI-BASED DETECTION ----------------
@@ -503,7 +537,9 @@ def calculate_drift_position_real_data(start_lat, start_lon, hours, direction="f
     return round(start_lat + delta_lat, 5), round(start_lon + delta_lon, 5), env_data
 
 # ---------------- ENGINE 3: REAL VESSEL DATA ATTRIBUTION ----------------
-def generate_realistic_vessel_scenario(ais_df, spill_lat, spill_lon, radius_km=30, n_vessels=8, seed=42):
+def generate_realistic_vessel_scenario(ais_df, spill_lat, spill_lon, radius_km=30, n_vessels=8, seed=None):
+    if seed is None:
+        seed = int((spill_lat * 1000 + spill_lon * 1000) % 100000)
     relevant_types = ['Cargo', 'Tanker', 'Fishing', 'Pleasure', 'Port tender']
     real_vessels_sample = ais_df[ais_df['shiptype'].isin(relevant_types)].dropna(
         subset=['sog', 'shiptype']
@@ -577,7 +613,37 @@ def check_repeat_offender(mmsi):
         return len(result.data)
     except Exception:
         return 0
+def play_radar_scan():
+    radar_placeholder = st.empty()
+    scan_messages = [
+        "SCANNING VESSEL REGISTRY...",
+        "CROSS-REFERENCING AIS DATABASE...",
+        "CALCULATING SUSPECT SCORES...",
+        "LOCKING TARGET..."
+    ]
+    for msg in scan_messages:
+        radar_placeholder.markdown(f"""
+        <div style="display:flex; flex-direction:column; align-items:center; padding:2.5rem 0;">
+            <div style="position:relative; width:140px; height:140px; border-radius:50%;
+                        border:1px solid rgba(0,255,156,0.25); display:flex; align-items:center; justify-content:center;">
+                <div style="position:absolute; width:100%; height:100%; border-radius:50%;
+                            background:conic-gradient(rgba(0,255,156,0.6), transparent 40%);
+                            animation: radar-spin 1.2s linear infinite;"></div>
+                <div style="position:absolute; width:70%; height:70%; border-radius:50%; border:1px solid rgba(0,255,156,0.15);"></div>
+                <div style="position:absolute; width:40%; height:40%; border-radius:50%; border:1px solid rgba(0,255,156,0.15);"></div>
+                <div style="position:relative; width:8px; height:8px; background:#00FF9C; border-radius:50%; box-shadow:0 0 10px #00FF9C;"></div>
+            </div>
+            <div style="font-family:'JetBrains Mono', monospace; color:#00FF9C; font-size:0.85rem; letter-spacing:2px; margin-top:1.2rem;">
+                {msg}
+            </div>
+        </div>
+        <style>
+            @keyframes radar-spin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
+        </style>
+        """, unsafe_allow_html=True)
+        time.sleep(0.6)
 
+    radar_placeholder.empty()
 def render_mission_tracker(placeholder, current_stage):
     stages = ["SCAN", "DETECT", "TRACE", "ATTRIBUTE", "COMPLETE"]
     stage_index = stages.index(current_stage)
@@ -695,9 +761,7 @@ st.sidebar.caption("Vessel identity data: Real AIS records (MMSI, type, speed)")
 
 # ---------------- MAIN DASHBOARD ----------------
 if run_button:
-    tracker_placeholder = st.empty()
-    render_mission_tracker(tracker_placeholder, "SCAN")
-    time.sleep(0.4)
+
 
     # ---- ENGINE 1 ----
     st.markdown('<div class="engine-card"><h3>🛰️ Engine 1 — Detection & Characterization</h3></div>', unsafe_allow_html=True)
@@ -745,7 +809,7 @@ if run_button:
     ranked['prior_incidents'] = ranked['mmsi'].apply(check_repeat_offender)
 
     # ---- ENGINE 2 ----
-    render_mission_tracker(tracker_placeholder, "TRACE")
+
     st.markdown('<div class="engine-card"><h3>🌊 Engine 2 — Hindcast & Forecast (Live Data)</h3></div>', unsafe_allow_html=True)
 
     env_data = get_ocean_wind_data(spill_lat, spill_lon)
@@ -802,73 +866,121 @@ if run_button:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ---- ENGINE 3 ----
-    render_mission_tracker(tracker_placeholder, "ATTRIBUTE")
-    st.markdown('<div class="engine-card"><h3>🚢 Engine 3 — Vessel Attribution (Real AIS Vessel Data)</h3></div>', unsafe_allow_html=True)
-    st.caption("Vessel identity (MMSI, type, speed, dimensions) from real historic AIS records. "
-               "Positions are representative for demonstration — full historical position-tracking "
-               "archives are planned for production deployment.")
-
-    st.dataframe(
-        ranked[['mmsi', 'ship_type', 'speed_knots', 'distance_from_spill_km', 'ais_signal_gap', 'suspect_score', 'risk_label', 'prior_incidents']],
-        width='stretch',
-        column_config={
-            "mmsi": "MMSI (Vessel ID)",
-            "ship_type": "Type",
-            "speed_knots": "Speed (knots)",
-            "distance_from_spill_km": "Distance (km)",
-            "ais_signal_gap": "AIS Signal Gap",
-            "suspect_score": st.column_config.ProgressColumn("Suspect Score", min_value=0, max_value=100, format="%.1f"),
-            "risk_label": "Risk Tier",
-            "prior_incidents": "Prior Incidents Flagged",
-        }
-    )
-    st.markdown("#### 🔍 Score Breakdown by Vessel")
-
-    vessel_list = ranked.to_dict('records')
-    for i in range(0, len(vessel_list), 2):
-        pair = vessel_list[i:i+2]
-        cols = st.columns(2)
-        for col, v in zip(cols, pair):
-            distance_pts = 35 if v['distance_from_spill_km'] <= 5 else (20 if v['distance_from_spill_km'] <= 10 else (10 if v['distance_from_spill_km'] <= 20 else 0))
-            gap_pts = 30 if v['ais_signal_gap'] else 0
-            traj_pts = round(v['trajectory_match'] * 25, 1)
-            type_pts = 10 if v['ship_type'] == "Tanker" else (5 if v['ship_type'] == "Cargo" else 0)
-            total = v['suspect_score']
-
-            with col:
-                card_html = (
-                    f'<div style="background:#0D131A; border:1px solid rgba(0,255,156,0.15); border-radius:8px; padding:1rem 1.2rem; margin-bottom:1rem;">'
-                    f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">'
-                    f'<span style="font-family:\'JetBrains Mono\', monospace; color:#DCEDE7; font-weight:600;">MMSI {v["mmsi"]}</span>'
-                    f'<span style="font-family:\'JetBrains Mono\', monospace; color:#00FF9C; font-weight:700; font-size:1.1rem;">{total}/100</span>'
-                    f'</div>'
-                    f'<div style="color:#6B8A82; font-size:0.75rem; margin-bottom:0.6rem;">{v["ship_type"]} &nbsp;\u2022&nbsp; {v["risk_label"]}</div>'
-                    f'<div style="display:flex; height:16px; border-radius:4px; overflow:hidden; margin-bottom:0.5rem;">'
-                    f'<div style="width:{distance_pts}%; background:#00FF9C;"></div>'
-                    f'<div style="width:{gap_pts}%; background:#FFB020;"></div>'
-                    f'<div style="width:{traj_pts}%; background:#0074D9;"></div>'
-                    f'<div style="width:{type_pts}%; background:#9D4EDD;"></div>'
-                    f'</div>'
-                    f'<div style="display:flex; flex-wrap:wrap; gap:0.8rem; font-family:\'JetBrains Mono\', monospace; font-size:0.7rem;">'
-                    f'<span style="color:#00FF9C;">\u25a0 Proximity {distance_pts}</span>'
-                    f'<span style="color:#FFB020;">\u25a0 AIS Gap {gap_pts}</span>'
-                    f'<span style="color:#0074D9;">\u25a0 Trajectory {traj_pts}</span>'
-                    f'<span style="color:#9D4EDD;">\u25a0 Type {type_pts}</span>'
-                    f'</div>'
-                    f'</div>'
-                )
-                st.markdown(card_html, unsafe_allow_html=True)
+       # ---- ENGINE 3 ----
+    if "show_engine3_details" not in st.session_state:
+        st.session_state.show_engine3_details = False
 
     top = ranked.iloc[0]
-    st.error(f"🚨 **Top Suspect Vessel: MMSI {top['mmsi']}** ({top['ship_type']}) — {top['risk_label']} — Suspect Score: {top['suspect_score']} / 100")
 
-    if top['prior_incidents'] > 0:
-        st.warning(f"⚠️ Repeat Offender Alert: MMSI {top['mmsi']} has appeared as a suspect vessel in {top['prior_incidents']} prior recorded incident(s).")
+    if not st.session_state.show_engine3_details:
+        st.markdown('<div class="engine-card"><h3>🚢 Engine 3 — Vessel Attribution (Real AIS Vessel Data)</h3></div>', unsafe_allow_html=True)
+        st.caption("Vessel identity (MMSI, type, speed, dimensions) from real historic AIS records. "
+                   "Positions are representative for demonstration.")
+        play_radar_scan()
+
+        img_base64 = get_image_base64(get_vessel_image_path(top['ship_type']))
+
+        top_card_html = (
+            f'<div style="background:#0D131A; border:1px solid rgba(0,255,156,0.2); border-radius:8px; '
+            f'padding:1.2rem; margin-bottom:1rem; position:relative; display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">'
+            f'<div style="position:absolute; top:-1px; left:-1px; width:16px; height:16px; border-top:2px solid #00FF9C; border-left:2px solid #00FF9C;"></div>'
+            f'<div style="position:absolute; bottom:-1px; right:-1px; width:16px; height:16px; border-bottom:2px solid #00FF9C; border-right:2px solid #00FF9C;"></div>'
+            f'<div style="flex-shrink:0; width:180px;">'
+            f'<img src="data:image/jpeg;base64,{img_base64}" style="width:100%; height:130px; object-fit:cover; border-radius:6px; border:1px solid rgba(0,255,156,0.15);">'
+            f'<div style="color:#3A4A52; font-size:0.6rem; font-family:\'JetBrains Mono\', monospace; margin-top:0.4rem; text-align:center;">TYPE ILLUSTRATION — NOT ACTUAL VESSEL PHOTO</div>'
+            f'</div>'
+            f'<div style="flex:1; min-width:200px;">'
+            f'<div style="font-family:\'JetBrains Mono\', monospace; color:#FFB020; font-size:0.75rem; letter-spacing:2px; margin-bottom:0.5rem;">'
+            f'&#128680; TOP SUSPECT VESSEL'
+            f'</div>'
+            f'<div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:1rem;">'
+            f'<div>'
+            f'<div style="font-family:\'Space Grotesk\', sans-serif; color:#DCEDE7; font-size:1.6rem; font-weight:700;">MMSI {top["mmsi"]}</div>'
+            f'<div style="color:#6B8A82; font-family:\'JetBrains Mono\', monospace; font-size:0.85rem; margin-top:0.2rem;">{top["ship_type"]} &nbsp;&bull;&nbsp; {top["risk_label"]}</div>'
+            f'</div>'
+            f'<div style="text-align:right;">'
+            f'<div style="font-family:\'JetBrains Mono\', monospace; color:#00FF9C; font-size:2.2rem; font-weight:700; text-shadow:0 0 12px rgba(0,255,156,0.4);">{top["suspect_score"]}/100</div>'
+            f'<div style="color:#6B8A82; font-size:0.7rem; font-family:\'JetBrains Mono\', monospace;">SUSPECT SCORE</div>'
+            f'</div>'
+            f'</div>'
+            f'</div>'
+            f'</div>'
+        )
+        st.markdown(top_card_html, unsafe_allow_html=True)
+
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Distance from Spill", f"{top['distance_from_spill_km']} km")
+        d2.metric("Speed", f"{top['speed_knots']} knots")
+        d3.metric("AIS Signal Gap", "Yes" if top['ais_signal_gap'] else "No")
+        d4.metric("Prior Incidents", int(top['prior_incidents']))
+
+        if top['prior_incidents'] > 0:
+            st.warning(f"⚠️ Repeat Offender Alert: MMSI {top['mmsi']} has appeared as a suspect vessel in {top['prior_incidents']} prior recorded incident(s).")
+
+        if st.button("📊 View Full Analysis"):
+            st.session_state.show_engine3_details = True
+            st.rerun()
+
+    else:
+        if st.button("⬅ Back to Home"):
+            st.session_state.show_engine3_details = False
+            st.rerun()
+
+        st.markdown('<div class="engine-card"><h3>📊 Full Vessel Analysis</h3></div>', unsafe_allow_html=True)
+
+        distance_pts = 35 if top['distance_from_spill_km'] <= 5 else (20 if top['distance_from_spill_km'] <= 10 else (10 if top['distance_from_spill_km'] <= 20 else 0))
+        gap_pts = 30 if top['ais_signal_gap'] else 0
+        traj_pts = round(top['trajectory_match'] * 25, 1)
+        type_pts = 10 if top['ship_type'] == "Tanker" else (5 if top['ship_type'] == "Cargo" else 0)
+
+        st.markdown("###### Why the top suspect scored this way")
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("Proximity", f"+{distance_pts}")
+        b2.metric("AIS Signal Gap", f"+{gap_pts}")
+        b3.metric("Trajectory Match", f"+{traj_pts}")
+        b4.metric("Vessel Type", f"+{type_pts}")
+
+        st.markdown("###### All vessels by suspect score")
+        chart_data = ranked[['mmsi', 'suspect_score', 'risk_label']].copy()
+        chart_data['mmsi'] = chart_data['mmsi'].astype(str)
+
+        color_scale = alt.Scale(
+            domain=["🔴 HIGH RISK", "🟡 MEDIUM RISK", "🟢 LOW RISK"],
+            range=["#EF4444", "#F59E0B", "#22C55E"]
+        )
+
+        chart = alt.Chart(chart_data).mark_bar(cornerRadiusEnd=4).encode(
+            x=alt.X('suspect_score:Q', title='Suspect Score', scale=alt.Scale(domain=[0, 100])),
+            y=alt.Y('mmsi:N', sort='-x', title='Vessel (MMSI)'),
+            color=alt.Color('risk_label:N', scale=color_scale, legend=alt.Legend(title="Risk Tier")),
+            tooltip=['mmsi', 'suspect_score', 'risk_label']
+        ).properties(height=300)
+        st.altair_chart(chart, use_container_width=True)
+
+        st.markdown("###### Full vessel data table")
+        st.dataframe(
+            ranked[['mmsi', 'ship_type', 'speed_knots', 'distance_from_spill_km', 'ais_signal_gap', 'suspect_score', 'risk_label', 'prior_incidents']],
+            width='stretch',
+            column_config={
+                "mmsi": "MMSI (Vessel ID)",
+                "ship_type": "Type",
+                "speed_knots": "Speed (knots)",
+                "distance_from_spill_km": "Distance (km)",
+                "ais_signal_gap": "AIS Signal Gap",
+                "suspect_score": st.column_config.ProgressColumn("Suspect Score", min_value=0, max_value=100, format="%.1f"),
+                "risk_label": "Risk Tier",
+                "prior_incidents": "Prior Incidents Flagged",
+            }
+        )
+
+        if st.button("⬅ Back to Home", key="bottom_back_button"):
+            st.session_state.show_engine3_details = False
+            st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ---- DATABASE SAVE ----
+       # ---- DATABASE SAVE ----
+    save_status_placeholder = st.empty()
     with st.spinner("Saving results to database..."):
         success, result = save_pipeline_results(
             spill_lat, spill_lon,
@@ -877,10 +989,11 @@ if run_button:
             ranked
         )
     if success:
-        st.success(f"✅ Results saved to database (Spill ID: {result})")
+        save_status_placeholder.success(f"✅ Results saved to database (Spill ID: {result})")
     else:
-        st.warning(f"⚠️ Database save failed: {result}")
-    render_mission_tracker(tracker_placeholder, "COMPLETE")
+        save_status_placeholder.warning(f"⚠️ Database save failed: {result}")
+    time.sleep(2)
+    save_status_placeholder.empty()
 
 else:
     st.markdown("""
