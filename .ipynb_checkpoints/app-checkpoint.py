@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 load_dotenv()
+os.makedirs("uploaded_images", exist_ok=True)
 
 supabase = create_client(
     os.environ.get("SUPABASE_URL"),
@@ -220,6 +221,16 @@ button[data-testid="baseButton-headerNoPadding"],
         padding-bottom: 0.5rem;
     }
 
+    /* ---- TABS ---- */
+    button[data-baseweb="tab"] {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.8rem !important;
+        letter-spacing: 1px;
+    }
+    div[data-baseweb="tab-highlight"] {
+        background-color: var(--signal) !important;
+    }
+
     /* ---- TABLE ---- */
     div[data-testid="stDataFrame"] {
         border: 1px solid rgba(0,255,156,0.15);
@@ -241,7 +252,7 @@ if "booted" not in st.session_state:
 if not st.session_state.booted:
     boot_placeholder = st.empty()
     boot_img_b64 = get_image_base64("assets/loading_ship.png")
-    BOOT_DURATION = 3.5  # seconds — change this to speed up/slow down
+    BOOT_DURATION = 2.2  # seconds — shortened for repeated demo runs
 
     boot_placeholder.markdown(f"""
     <style>
@@ -250,9 +261,6 @@ if not st.session_state.booted:
         @keyframes fillBar {{
             from {{ width: 0%; }}
             to {{ width: 100%; }}
-        }}
-        @keyframes cycleText {{
-            0%   {{ content: "INITIALIZING ORCA SYSTEM..."; }}
         }}
         #boot-bar-fill {{
             animation: fillBar {BOOT_DURATION}s linear forwards;
@@ -263,11 +271,11 @@ if not st.session_state.booted:
         }}
         @keyframes msgSwap {{
             0%   {{ content: "INITIALIZING ORCA SYSTEM..."; }}
-            15%  {{ content: "ESTABLISHING SATELLITE UPLINK..."; }}
+            15%  {{ content: "CONNECTING TO DISASTER RESPONSE NETWORK..."; }}
             30%  {{ content: "LOADING AI DETECTION MODEL (U-NET)..."; }}
             50%  {{ content: "SYNCING LIVE OCEAN & WIND DATA FEED..."; }}
             68%  {{ content: "LOADING AIS VESSEL REGISTRY..."; }}
-            85%  {{ content: "CALIBRATING ATTRIBUTION ENGINE..."; }}
+            85%  {{ content: "PREPARING RESPONSE RECOMMENDATIONS..."; }}
             97%  {{ content: "SYSTEM READY."; }}
         }}
     </style>
@@ -309,13 +317,13 @@ header_html = (
     f'<div style="position:absolute; bottom:-1px; right:-1px; width:18px; height:18px; border-bottom:2px solid #00FF9C; border-right:2px solid #00FF9C;"></div>'
     f'<div>'
     f'<h1>&#128011; Project ORCA</h1>'
-    f'<p><span class="live-dot"></span>LIVE SURVEILLANCE FEED &nbsp;//&nbsp; DETECT &middot; TRACE &middot; ATTRIBUTE &nbsp;//&nbsp; NTRO SIH26143</p>'
+    f'<p><span class="live-dot"></span>MARINE DISASTER RESPONSE SYSTEM &nbsp;//&nbsp; DETECT &middot; TRACE &middot; ATTRIBUTE &nbsp;//&nbsp; NTRO SIH26143</p>'
     f'</div>'
     f'<div style="text-align:right; font-family:\'JetBrains Mono\', monospace; font-size:0.7rem; color:#6B8A82; line-height:1.8;">'
     f'<div>SYSTEM STATUS: <span style="color:#00FF9C; font-weight:700;">ONLINE</span></div>'
     f'<div>SESSION: <span style="color:#00FF9C; font-weight:700;">{st.session_state.session_id}</span></div>'
     f'<div>LAST SYNC: <span style="color:#00FF9C; font-weight:700;">{sync_time}</span></div>'
-    f'<div>CLEARANCE: <span style="color:#FFB020; font-weight:700;">RESTRICTED</span></div>'
+    f'<div>MODE: <span style="color:#FFB020; font-weight:700;">DISASTER RESPONSE</span></div>'
     f'</div>'
     f'</div>'
 )
@@ -461,9 +469,6 @@ def characterize_spill_shape_and_age(contours):
     complexity_index = (perimeter ** 2) / (4 * math.pi * area) if area > 0 else 1.0
 
     # ---- AGE / WEATHERING HEURISTIC ----
-    # Basis: fresh spills are compact & smooth-edged; wind/wave action spreads
-    # and fragments a slick over time, increasing both fragment count and
-    # boundary irregularity.
     if num_fragments <= 1 and complexity_index < 2.5:
         age_label = "Fresh (likely < 3 hours)"
     elif num_fragments <= 3 and complexity_index < 4.5:
@@ -536,6 +541,38 @@ def calculate_drift_position_real_data(start_lat, start_lon, hours, direction="f
 
     return round(start_lat + delta_lat, 5), round(start_lon + delta_lon, 5), env_data
 
+# ---------------- IMPACT ZONE REFERENCE DATA (Indian coast) ----------------
+INDIA_PORTS = {
+    "Mumbai Port / JNPT": (18.95, 72.95),
+    "Kandla Port (Gujarat)": (23.03, 70.22),
+    "Paradip Port (Odisha)": (20.27, 86.67),
+    "Visakhapatnam Port": (17.68, 83.28),
+    "Chennai Port": (13.10, 80.30),
+    "Kochi Port": (9.97, 76.24),
+    "New Mangalore Port": (12.92, 74.80),
+    "Tuticorin Port": (8.76, 78.21),
+    "Haldia Port (West Bengal)": (22.02, 88.06),
+}
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def find_nearest_port(spill_lat, spill_lon):
+    nearest_name, nearest_dist = None, float("inf")
+    for name, (plat, plon) in INDIA_PORTS.items():
+        dist = haversine_km(spill_lat, spill_lon, plat, plon)
+        if dist < nearest_dist:
+            nearest_name, nearest_dist = name, dist
+    return nearest_name, round(nearest_dist, 1)
+
+
 # ---------------- ENGINE 3: REAL VESSEL DATA ATTRIBUTION ----------------
 def generate_realistic_vessel_scenario(ais_df, spill_lat, spill_lon, radius_km=30, n_vessels=8, seed=None):
     if seed is None:
@@ -577,6 +614,12 @@ def generate_realistic_vessel_scenario(ais_df, spill_lat, spill_lon, radius_km=3
         })
 
     return pd.DataFrame(vessels)
+
+
+def generate_port_overview_vessels(port_lat, port_lon):
+    """Small, deterministic vessel set shown around a non-active port for
+    the national overview map — not part of any attribution/scoring."""
+    return generate_realistic_vessel_scenario(ais_source_df, port_lat, port_lon, radius_km=15, n_vessels=4)
 
 
 def calculate_suspect_score(row):
@@ -724,16 +767,24 @@ if "current_image" not in st.session_state:
 if st.sidebar.button("🔀 New Random Image"):
     st.session_state.current_image = random.choice(all_images)
 
-image_path = st.session_state.current_image
-st.sidebar.caption(f"Current image: `{image_path}`")
-india_locations = {
-    "Mumbai High offshore field (Arabian Sea)": (19.5, 71.5),
-    "Gulf of Kutch (Gujarat coast)": (22.45, 69.05),
-    "Paradip Port approach (Odisha, Bay of Bengal)": (20.30, 86.75),
-    "Custom / Manual entry": None
-}
+uploaded_file = st.sidebar.file_uploader(
+    "Or upload your own satellite image (optional)",
+    type=["jpg", "jpeg", "png"]
+)
 
-selected_location = st.sidebar.selectbox("Spill Location Preset", list(india_locations.keys()))
+if uploaded_file is not None:
+    saved_path = f"uploaded_images/{uploaded_file.name}"
+    with open(saved_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    image_path = saved_path
+else:
+    image_path = st.session_state.current_image
+
+st.sidebar.caption(f"Current image: `{image_path}`")
+india_locations = dict(INDIA_PORTS)
+india_locations["Custom / Manual entry"] = None
+
+selected_location = st.sidebar.selectbox("Spill Location Preset (Major Indian Ports)", list(india_locations.keys()))
 
 if india_locations[selected_location] is not None:
     default_lat, default_lon = india_locations[selected_location]
@@ -762,63 +813,31 @@ st.sidebar.caption("Vessel identity data: Real AIS records (MMSI, type, speed)")
 # ---------------- MAIN DASHBOARD ----------------
 if run_button:
 
+    # ==================================================================
+    # ALL CALCULATIONS HAPPEN FIRST (before any rendering) so the top
+    # summary strip has everything it needs immediately.
+    # ==================================================================
 
-    # ---- ENGINE 1 ----
-    st.markdown('<div class="engine-card"><h3>🛰️ Engine 1 — Detection & Characterization</h3></div>', unsafe_allow_html=True)
-
+    # ---- ENGINE 1 CALC ----
     original, mask, highlighted, contours = analyze_oil_spill_ai(image_path, trained_model)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.image(original, caption="Original Satellite Image", width='stretch', clamp=True)
-    with col2:
-        st.image(mask, caption="AI-Detected Regions", width='stretch', clamp=True)
-    with col3:
-        st.image(highlighted, caption="Spill Boundary Highlighted", width='stretch', clamp=True, channels="BGR")
-
     area_km2 = None
+    characterization = None
     if len(contours) > 0:
         largest = max(contours, key=cv2.contourArea)
         area_km2 = (cv2.contourArea(largest) * 100) / 1_000_000
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Spill Regions Detected", len(contours))
-        m2.metric("Largest Spill Area", f"{round(area_km2, 4)} km²")
-        m3.metric("Detection Model", "U-Net (PyTorch)")
-
         characterization = characterize_spill_shape_and_age(contours)
-        c1, c2 = st.columns(2)
-        c1.metric("Estimated Shape", characterization["shape_label"])
-        c2.metric("Estimated Age", characterization["age_label"])
 
-        with st.expander("ℹ️ How shape & age were estimated"):
-            st.caption(f"**Aspect ratio:** {characterization['aspect_ratio']} — {characterization['shape_reasoning']}")
-            st.caption(f"**Shape complexity index:** {characterization['complexity_index']} (1.0 = perfect circle; higher = more irregular/fragmented)")
-            st.caption(f"**Fragments detected:** {characterization['num_fragments']}")
-            st.caption("Age is a heuristic estimate based on spill fragmentation and boundary irregularity, not a precise physical measurement.")
-    else:
-        st.warning("No spill detected in this image.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ---- VESSEL DATA (computed early so map + table both use it) ----
+    # ---- ENGINE 3 CALC (vessel ranking) ----
     scenario_df = generate_realistic_vessel_scenario(ais_source_df, spill_lat, spill_lon)
     scenario_df['suspect_score'] = scenario_df.apply(calculate_suspect_score, axis=1)
     ranked = scenario_df.sort_values(by='suspect_score', ascending=False).reset_index(drop=True)
     ranked['risk_label'] = ranked['suspect_score'].apply(lambda s: get_risk_tier(s)[0])
     ranked['risk_color'] = ranked['suspect_score'].apply(lambda s: get_risk_tier(s)[1])
     ranked['prior_incidents'] = ranked['mmsi'].apply(check_repeat_offender)
+    top = ranked.iloc[0]
 
-    # ---- ENGINE 2 ----
-
-    st.markdown('<div class="engine-card"><h3>🌊 Engine 2 — Hindcast & Forecast (Live Data)</h3></div>', unsafe_allow_html=True)
-
+    # ---- ENGINE 2 CALC (ocean/wind + drift trajectory) ----
     env_data = get_ocean_wind_data(spill_lat, spill_lon)
-
-    e1, e2, e3, e4 = st.columns(4)
-    e1.metric("Ocean Current", f"{env_data['current_speed_kmph']} km/h")
-    e2.metric("Current Direction", f"{env_data['current_direction_deg']}°")
-    e3.metric("Wind Speed", f"{env_data['wind_speed_kmph']} km/h")
-    e4.metric("Wind Direction", f"{env_data['wind_direction_deg']}°")
 
     hindcast_hours = [12, 9, 6, 3]
     forecast_hours = [3, 6, 9, 12]
@@ -835,170 +854,334 @@ if run_button:
     origin_lat, origin_lon = trajectory_points[0][0], trajectory_points[0][1]
     future_lat, future_lon = trajectory_points[-1][0], trajectory_points[-1][1]
 
-    if map_style == "Satellite (Esri)":
-        m = folium.Map(location=[spill_lat, spill_lon], zoom_start=9, tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr="Esri, Maxar, Earthstar Geographics")
-    else:
-        m = folium.Map(location=[spill_lat, spill_lon], zoom_start=9, tiles="OpenStreetMap")
+    # ---- IMPACT ZONE CALC ----
+    nearest_port_name, nearest_port_dist_km = find_nearest_port(spill_lat, spill_lon)
+    # Impact radius approximated as the furthest drift point from the spill origin
+    impact_radius_km = max(
+        haversine_km(spill_lat, spill_lon, lat, lon) for lat, lon, _ in trajectory_points
+    )
 
-    for lat, lon, label in trajectory_points:
-        if label == "Detected Spill (T+0)":
-            folium.Marker([lat, lon], popup=label, icon=folium.Icon(color="darkred", icon="tint")).add_to(m)
-        elif label.startswith("-"):
-            folium.CircleMarker([lat, lon], radius=5, popup=f"Hindcast: {label}", color="#FFB020", fill=True, fill_opacity=0.9).add_to(m)
+    # ---- URGENCY CALC ----
+    spill_detected = len(contours) > 0
+    urgency = "IMMEDIATE" if (spill_detected and (area_km2 > 0.5 or top['suspect_score'] >= 70)) else \
+              "PRIORITY" if (spill_detected and area_km2 > 0.1) else "MONITOR"
+    urgency_color = {"IMMEDIATE": "#EF4444", "PRIORITY": "#FFB020", "MONITOR": "#00FF9C"}[urgency]
+
+    # ==================================================================
+    # TOP SUMMARY STRIP — always visible, no scrolling needed
+    # ==================================================================
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Spill Detected", "Yes" if spill_detected else "No")
+    s2.metric("Spill Area", f"{round(area_km2, 4)} km²" if area_km2 else "—")
+    s3.metric("Top Suspect Score", f"{top['suspect_score']}/100" if spill_detected else "N/A")
+    s4.markdown(f"""
+    <div style="background:#0D131A; border:1px solid {urgency_color}; border-radius:4px; padding:0.9rem 1.1rem; text-align:center;">
+        <div style="color:#6B8A82; font-family:'JetBrains Mono', monospace; text-transform:uppercase; font-size:0.7rem; letter-spacing:1px;">Urgency</div>
+        <div style="color:{urgency_color}; font-weight:700; font-size:1.4rem; text-shadow:0 0 12px {urgency_color}66;">{urgency}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ==================================================================
+    # TABS — each engine gets its own section, no more one long scroll
+    # ==================================================================
+    tab1, tab2, tab3, tab4 = st.tabs(["🛰️ Detection", "🌊 Drift Analysis", "🚢 Attribution", "🚨 Response"])
+
+    # ---------------- TAB 1: DETECTION ----------------
+    with tab1:
+        st.markdown('<div class="engine-card"><h3>🛰️ Engine 1 — Detection & Characterization</h3></div>', unsafe_allow_html=True)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.image(original, caption="Original Satellite Image", width='stretch', clamp=True)
+        with col2:
+            st.image(mask, caption="AI-Detected Regions", width='stretch', clamp=True)
+        with col3:
+            st.image(highlighted, caption="Spill Boundary Highlighted", width='stretch', clamp=True, channels="BGR")
+
+        if len(contours) > 0:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Spill Regions Detected", len(contours))
+            m2.metric("Largest Spill Area", f"{round(area_km2, 4)} km²")
+            m3.metric("Detection Model", "U-Net (PyTorch)")
+
+            c1, c2 = st.columns(2)
+            c1.metric("Estimated Shape", characterization["shape_label"])
+            c2.metric("Estimated Age", characterization["age_label"])
+
+            with st.expander("ℹ️ How shape & age were estimated"):
+                st.caption(f"**Aspect ratio:** {characterization['aspect_ratio']} — {characterization['shape_reasoning']}")
+                st.caption(f"**Shape complexity index:** {characterization['complexity_index']} (1.0 = perfect circle; higher = more irregular/fragmented)")
+                st.caption(f"**Fragments detected:** {characterization['num_fragments']}")
+                st.caption("Age is a heuristic estimate based on spill fragmentation and boundary irregularity, not a precise physical measurement.")
         else:
-            folium.CircleMarker([lat, lon], radius=5, popup=f"Forecast: {label}", color="#0074D9", fill=True, fill_opacity=0.9).add_to(m)
+            st.warning("No spill detected in this image.")
 
-    folium.PolyLine([[p[0], p[1]] for p in trajectory_points], color="#0A2540", weight=3, dash_array="6").add_to(m)
+    # ---------------- TAB 2: DRIFT ANALYSIS ----------------
+    with tab2:
+        st.markdown('<div class="engine-card"><h3>🌊 Engine 2 — Hindcast & Forecast (Live Data)</h3></div>', unsafe_allow_html=True)
 
-    # ---- VESSEL MARKERS (new) ----
-    for _, v in ranked.iterrows():
-        folium.Marker(
-            [v['latitude'], v['longitude']],
-            popup=f"MMSI {v['mmsi']} — {v['ship_type']} — {v['risk_label']} ({v['suspect_score']}/100)",
-            icon=folium.Icon(color=v['risk_color'], icon="ship", prefix="fa")
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Ocean Current", f"{env_data['current_speed_kmph']} km/h")
+        e2.metric("Current Direction", f"{env_data['current_direction_deg']}°")
+        e3.metric("Wind Speed", f"{env_data['wind_speed_kmph']} km/h")
+        e4.metric("Wind Direction", f"{env_data['wind_direction_deg']}°")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        i1, i2, i3 = st.columns(3)
+        i1.metric("Nearest Port / Facility", nearest_port_name)
+        i2.metric("Distance to Port", f"{nearest_port_dist_km} km")
+        i3.metric("Impact Zone Radius", f"{round(impact_radius_km, 1)} km")
+
+        if map_style == "Satellite (Esri)":
+            m = folium.Map(location=[spill_lat, spill_lon], zoom_start=9, tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr="Esri, Maxar, Earthstar Geographics")
+        else:
+            m = folium.Map(location=[spill_lat, spill_lon], zoom_start=9, tiles="OpenStreetMap")
+
+        for lat, lon, label in trajectory_points:
+            if label == "Detected Spill (T+0)":
+                folium.Marker([lat, lon], popup=label, icon=folium.Icon(color="darkred", icon="tint")).add_to(m)
+            elif label.startswith("-"):
+                folium.CircleMarker([lat, lon], radius=5, popup=f"Hindcast: {label}", color="#FFB020", fill=True, fill_opacity=0.9).add_to(m)
+            else:
+                folium.CircleMarker([lat, lon], radius=5, popup=f"Forecast: {label}", color="#0074D9", fill=True, fill_opacity=0.9).add_to(m)
+
+        folium.PolyLine([[p[0], p[1]] for p in trajectory_points], color="#0A2540", weight=3, dash_array="6").add_to(m)
+
+        # ---- Impact zone circle (approximate drift-affected radius) ----
+        folium.Circle(
+            location=[spill_lat, spill_lon],
+            radius=impact_radius_km * 1000,
+            color="#FFB020",
+            weight=1.5,
+            fill=True,
+            fill_color="#FFB020",
+            fill_opacity=0.08,
+            popup=f"Approx. impact zone: {round(impact_radius_km, 1)} km radius"
         ).add_to(m)
 
-    st_folium(m, width=1200, height=400, returned_objects=[])
+        # ---- Nearest port marker ----
+        nearest_port_coords = INDIA_PORTS[nearest_port_name]
+        folium.Marker(
+            list(nearest_port_coords),
+            popup=f"{nearest_port_name} — {nearest_port_dist_km} km from spill",
+            icon=folium.Icon(color="blue", icon="anchor", prefix="fa")
+        ).add_to(m)
 
-    o1, o2 = st.columns(2)
-    o1.info(f"**Estimated Origin (12h prior):** {origin_lat}, {origin_lon}")
-    o2.info(f"**Predicted Position (12h ahead):** {future_lat}, {future_lon}")
+        for _, v in ranked.iterrows():
+            folium.Marker(
+                [v['latitude'], v['longitude']],
+                popup=f"MMSI {v['mmsi']} — {v['ship_type']} — {v['risk_label']} ({v['suspect_score']}/100)",
+                icon=folium.Icon(color=v['risk_color'], icon="ship", prefix="fa")
+            ).add_to(m)
+
+        # ---- NATIONAL PORT OVERVIEW: all 9 ports + their own live vessel traffic ----
+        active_port_name = selected_location if selected_location in INDIA_PORTS else nearest_port_name
+
+        for port_name, (plat, plon) in INDIA_PORTS.items():
+            if port_name == active_port_name:
+                # Highlight the active/selected region distinctly from the rest
+                folium.Marker(
+                    [plat, plon],
+                    popup=f"⭐ ACTIVE REGION: {port_name}",
+                    icon=folium.Icon(color="red", icon="star", prefix="fa")
+                ).add_to(m)
+                folium.Circle(
+                    location=[plat, plon],
+                    radius=25000,
+                    color="#EF4444",
+                    weight=2,
+                    fill=False,
+                    dash_array="4",
+                    popup=f"Active monitoring region: {port_name}"
+                ).add_to(m)
+            else:
+                # Background national traffic — not attributed to the active spill
+                folium.Marker(
+                    [plat, plon],
+                    popup=f"{port_name} (reference port)",
+                    icon=folium.Icon(color="lightgray", icon="anchor", prefix="fa")
+                ).add_to(m)
+
+                overview_vessels = generate_port_overview_vessels(plat, plon)
+                for _, ov in overview_vessels.iterrows():
+                    folium.CircleMarker(
+                        [ov['latitude'], ov['longitude']],
+                        radius=4,
+                        color="#3A4A52",
+                        fill=True,
+                        fill_color="#6B8A82",
+                        fill_opacity=0.7,
+                        popup=f"MMSI {ov['mmsi']} — {ov['ship_type']} (background traffic, {port_name})"
+                    ).add_to(m)
+
+        st_folium(m, width=1200, height=550, returned_objects=[])
+
+        st.caption("🔴 Red star = active monitored region &nbsp;|&nbsp; ⚓ Grey anchors = other national ports (reference traffic, not attributed)")
+
+        o1, o2 = st.columns(2)
+        o1.info(f"**Estimated Origin (12h prior):** {origin_lat}, {origin_lon}")
+        o2.info(f"**Predicted Position (12h ahead):** {future_lat}, {future_lon}")
+
+    # ---------------- TAB 3: ATTRIBUTION ----------------
+    with tab3:
+        if not spill_detected:
+            st.markdown('<div class="engine-card"><h3>🚢 Engine 3 — Vessel Attribution (Real AIS Vessel Data)</h3></div>', unsafe_allow_html=True)
+            st.info("No spill was detected in this image, so there is nothing to attribute. Vessel attribution only runs against a confirmed spill detection from Engine 1.")
+            st.session_state.show_engine3_details = False
+
+        if "show_engine3_details" not in st.session_state:
+            st.session_state.show_engine3_details = False
+
+        if spill_detected and not st.session_state.show_engine3_details:
+            st.markdown('<div class="engine-card"><h3>🚢 Engine 3 — Vessel Attribution (Real AIS Vessel Data)</h3></div>', unsafe_allow_html=True)
+            st.caption("Vessel identity (MMSI, type, speed, dimensions) from real historic AIS records. "
+                       "Positions are representative for demonstration.")
+            play_radar_scan()
+
+            img_base64 = get_image_base64(get_vessel_image_path(top['ship_type']))
+
+            top_card_html = (
+                f'<div style="background:#0D131A; border:1px solid rgba(0,255,156,0.2); border-radius:8px; '
+                f'padding:1.2rem; margin-bottom:1rem; position:relative; display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">'
+                f'<div style="position:absolute; top:-1px; left:-1px; width:16px; height:16px; border-top:2px solid #00FF9C; border-left:2px solid #00FF9C;"></div>'
+                f'<div style="position:absolute; bottom:-1px; right:-1px; width:16px; height:16px; border-bottom:2px solid #00FF9C; border-right:2px solid #00FF9C;"></div>'
+                f'<div style="flex-shrink:0; width:180px;">'
+                f'<img src="data:image/jpeg;base64,{img_base64}" style="width:100%; height:130px; object-fit:cover; border-radius:6px; border:1px solid rgba(0,255,156,0.15);">'
+                f'<div style="color:#3A4A52; font-size:0.6rem; font-family:\'JetBrains Mono\', monospace; margin-top:0.4rem; text-align:center;">TYPE ILLUSTRATION — NOT ACTUAL VESSEL PHOTO</div>'
+                f'</div>'
+                f'<div style="flex:1; min-width:200px;">'
+                f'<div style="font-family:\'JetBrains Mono\', monospace; color:#FFB020; font-size:0.75rem; letter-spacing:2px; margin-bottom:0.5rem;">'
+                f'&#128680; TOP SUSPECT VESSEL'
+                f'</div>'
+                f'<div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:1rem;">'
+                f'<div>'
+                f'<div style="font-family:\'Space Grotesk\', sans-serif; color:#DCEDE7; font-size:1.6rem; font-weight:700;">MMSI {top["mmsi"]}</div>'
+                f'<div style="color:#6B8A82; font-family:\'JetBrains Mono\', monospace; font-size:0.85rem; margin-top:0.2rem;">{top["ship_type"]} &nbsp;&bull;&nbsp; {top["risk_label"]}</div>'
+                f'</div>'
+                f'<div style="text-align:right;">'
+                f'<div style="font-family:\'JetBrains Mono\', monospace; color:#00FF9C; font-size:2.2rem; font-weight:700; text-shadow:0 0 12px rgba(0,255,156,0.4);">{top["suspect_score"]}/100</div>'
+                f'<div style="color:#6B8A82; font-size:0.7rem; font-family:\'JetBrains Mono\', monospace;">SUSPECT SCORE</div>'
+                f'</div>'
+                f'</div>'
+                f'</div>'
+                f'</div>'
+            )
+            st.markdown(top_card_html, unsafe_allow_html=True)
+
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric("Distance from Spill", f"{top['distance_from_spill_km']} km")
+            d2.metric("Speed", f"{top['speed_knots']} knots")
+            d3.metric("AIS Signal Gap", "Yes" if top['ais_signal_gap'] else "No")
+            d4.metric("Prior Incidents", int(top['prior_incidents']))
+
+            if top['prior_incidents'] > 0:
+                st.warning(f"⚠️ Repeat Offender Alert: MMSI {top['mmsi']} has appeared as a suspect vessel in {top['prior_incidents']} prior recorded incident(s).")
+
+            if st.button("📊 View Full Analysis"):
+                st.session_state.show_engine3_details = True
+                st.rerun()
+
+        elif spill_detected:
+            if st.button("⬅ Back"):
+                st.session_state.show_engine3_details = False
+                st.rerun()
+
+            st.markdown('<div class="engine-card"><h3>📊 Full Vessel Analysis</h3></div>', unsafe_allow_html=True)
+
+            distance_pts = 35 if top['distance_from_spill_km'] <= 5 else (20 if top['distance_from_spill_km'] <= 10 else (10 if top['distance_from_spill_km'] <= 20 else 0))
+            gap_pts = 30 if top['ais_signal_gap'] else 0
+            traj_pts = round(top['trajectory_match'] * 25, 1)
+            type_pts = 10 if top['ship_type'] == "Tanker" else (5 if top['ship_type'] == "Cargo" else 0)
+
+            st.markdown("###### Why the top suspect scored this way")
+            b1, b2, b3, b4 = st.columns(4)
+            b1.metric("Proximity", f"+{distance_pts}")
+            b2.metric("AIS Signal Gap", f"+{gap_pts}")
+            b3.metric("Trajectory Match", f"+{traj_pts}")
+            b4.metric("Vessel Type", f"+{type_pts}")
+
+            st.markdown("###### All vessels by suspect score")
+            chart_data = ranked[['mmsi', 'suspect_score', 'risk_label']].copy()
+            chart_data['mmsi'] = chart_data['mmsi'].astype(str)
+
+            color_scale = alt.Scale(
+                domain=["🔴 HIGH RISK", "🟡 MEDIUM RISK", "🟢 LOW RISK"],
+                range=["#EF4444", "#F59E0B", "#22C55E"]
+            )
+
+            chart = alt.Chart(chart_data).mark_bar(cornerRadiusEnd=4).encode(
+                x=alt.X('suspect_score:Q', title='Suspect Score', scale=alt.Scale(domain=[0, 100])),
+                y=alt.Y('mmsi:N', sort='-x', title='Vessel (MMSI)'),
+                color=alt.Color('risk_label:N', scale=color_scale, legend=alt.Legend(title="Risk Tier")),
+                tooltip=['mmsi', 'suspect_score', 'risk_label']
+            ).properties(height=300)
+            st.altair_chart(chart, use_container_width=True)
+
+            st.markdown("###### Full vessel data table")
+            st.dataframe(
+                ranked[['mmsi', 'ship_type', 'speed_knots', 'distance_from_spill_km', 'ais_signal_gap', 'suspect_score', 'risk_label', 'prior_incidents']],
+                width='stretch',
+                column_config={
+                    "mmsi": "MMSI (Vessel ID)",
+                    "ship_type": "Type",
+                    "speed_knots": "Speed (knots)",
+                    "distance_from_spill_km": "Distance (km)",
+                    "ais_signal_gap": "AIS Signal Gap",
+                    "suspect_score": st.column_config.ProgressColumn("Suspect Score", min_value=0, max_value=100, format="%.1f"),
+                    "risk_label": "Risk Tier",
+                    "prior_incidents": "Prior Incidents Flagged",
+                }
+            )
+
+            if st.button("⬅ Back", key="bottom_back_button"):
+                st.session_state.show_engine3_details = False
+                st.rerun()
+
+    # ---------------- TAB 4: RESPONSE ----------------
+    with tab4:
+        st.markdown('<div class="engine-card"><h3>🚨 Recommended Response Actions</h3></div>', unsafe_allow_html=True)
+
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Response Urgency", urgency)
+        r2.metric("Est. Response Window", "< 3 hrs" if urgency == "IMMEDIATE" else "< 12 hrs" if urgency == "PRIORITY" else "Routine")
+        r3.metric("Recommended Authority", "Indian Coast Guard + State Pollution Control Board" if spill_detected else "None — monitoring only")
+
+        if spill_detected:
+            st.info(f"📋 **Suggested Action:** Alert nearest Coast Guard station of spill at ({spill_lat}, {spill_lon}). "
+                    f"Flag MMSI {top['mmsi']} for boarding/inspection based on {top['suspect_score']}/100 suspect score. "
+                    f"Deploy containment resources along projected {forecast_hours[-1]}h drift path.")
+        else:
+            st.success("✅ No active spill detected. No response action required — system remains in passive monitoring mode.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-       # ---- ENGINE 3 ----
-    if "show_engine3_details" not in st.session_state:
-        st.session_state.show_engine3_details = False
-
-    top = ranked.iloc[0]
-
-    if not st.session_state.show_engine3_details:
-        st.markdown('<div class="engine-card"><h3>🚢 Engine 3 — Vessel Attribution (Real AIS Vessel Data)</h3></div>', unsafe_allow_html=True)
-        st.caption("Vessel identity (MMSI, type, speed, dimensions) from real historic AIS records. "
-                   "Positions are representative for demonstration.")
-        play_radar_scan()
-
-        img_base64 = get_image_base64(get_vessel_image_path(top['ship_type']))
-
-        top_card_html = (
-            f'<div style="background:#0D131A; border:1px solid rgba(0,255,156,0.2); border-radius:8px; '
-            f'padding:1.2rem; margin-bottom:1rem; position:relative; display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">'
-            f'<div style="position:absolute; top:-1px; left:-1px; width:16px; height:16px; border-top:2px solid #00FF9C; border-left:2px solid #00FF9C;"></div>'
-            f'<div style="position:absolute; bottom:-1px; right:-1px; width:16px; height:16px; border-bottom:2px solid #00FF9C; border-right:2px solid #00FF9C;"></div>'
-            f'<div style="flex-shrink:0; width:180px;">'
-            f'<img src="data:image/jpeg;base64,{img_base64}" style="width:100%; height:130px; object-fit:cover; border-radius:6px; border:1px solid rgba(0,255,156,0.15);">'
-            f'<div style="color:#3A4A52; font-size:0.6rem; font-family:\'JetBrains Mono\', monospace; margin-top:0.4rem; text-align:center;">TYPE ILLUSTRATION — NOT ACTUAL VESSEL PHOTO</div>'
-            f'</div>'
-            f'<div style="flex:1; min-width:200px;">'
-            f'<div style="font-family:\'JetBrains Mono\', monospace; color:#FFB020; font-size:0.75rem; letter-spacing:2px; margin-bottom:0.5rem;">'
-            f'&#128680; TOP SUSPECT VESSEL'
-            f'</div>'
-            f'<div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:1rem;">'
-            f'<div>'
-            f'<div style="font-family:\'Space Grotesk\', sans-serif; color:#DCEDE7; font-size:1.6rem; font-weight:700;">MMSI {top["mmsi"]}</div>'
-            f'<div style="color:#6B8A82; font-family:\'JetBrains Mono\', monospace; font-size:0.85rem; margin-top:0.2rem;">{top["ship_type"]} &nbsp;&bull;&nbsp; {top["risk_label"]}</div>'
-            f'</div>'
-            f'<div style="text-align:right;">'
-            f'<div style="font-family:\'JetBrains Mono\', monospace; color:#00FF9C; font-size:2.2rem; font-weight:700; text-shadow:0 0 12px rgba(0,255,156,0.4);">{top["suspect_score"]}/100</div>'
-            f'<div style="color:#6B8A82; font-size:0.7rem; font-family:\'JetBrains Mono\', monospace;">SUSPECT SCORE</div>'
-            f'</div>'
-            f'</div>'
-            f'</div>'
-            f'</div>'
-        )
-        st.markdown(top_card_html, unsafe_allow_html=True)
-
-        d1, d2, d3, d4 = st.columns(4)
-        d1.metric("Distance from Spill", f"{top['distance_from_spill_km']} km")
-        d2.metric("Speed", f"{top['speed_knots']} knots")
-        d3.metric("AIS Signal Gap", "Yes" if top['ais_signal_gap'] else "No")
-        d4.metric("Prior Incidents", int(top['prior_incidents']))
-
-        if top['prior_incidents'] > 0:
-            st.warning(f"⚠️ Repeat Offender Alert: MMSI {top['mmsi']} has appeared as a suspect vessel in {top['prior_incidents']} prior recorded incident(s).")
-
-        if st.button("📊 View Full Analysis"):
-            st.session_state.show_engine3_details = True
-            st.rerun()
-
-    else:
-        if st.button("⬅ Back to Home"):
-            st.session_state.show_engine3_details = False
-            st.rerun()
-
-        st.markdown('<div class="engine-card"><h3>📊 Full Vessel Analysis</h3></div>', unsafe_allow_html=True)
-
-        distance_pts = 35 if top['distance_from_spill_km'] <= 5 else (20 if top['distance_from_spill_km'] <= 10 else (10 if top['distance_from_spill_km'] <= 20 else 0))
-        gap_pts = 30 if top['ais_signal_gap'] else 0
-        traj_pts = round(top['trajectory_match'] * 25, 1)
-        type_pts = 10 if top['ship_type'] == "Tanker" else (5 if top['ship_type'] == "Cargo" else 0)
-
-        st.markdown("###### Why the top suspect scored this way")
-        b1, b2, b3, b4 = st.columns(4)
-        b1.metric("Proximity", f"+{distance_pts}")
-        b2.metric("AIS Signal Gap", f"+{gap_pts}")
-        b3.metric("Trajectory Match", f"+{traj_pts}")
-        b4.metric("Vessel Type", f"+{type_pts}")
-
-        st.markdown("###### All vessels by suspect score")
-        chart_data = ranked[['mmsi', 'suspect_score', 'risk_label']].copy()
-        chart_data['mmsi'] = chart_data['mmsi'].astype(str)
-
-        color_scale = alt.Scale(
-            domain=["🔴 HIGH RISK", "🟡 MEDIUM RISK", "🟢 LOW RISK"],
-            range=["#EF4444", "#F59E0B", "#22C55E"]
-        )
-
-        chart = alt.Chart(chart_data).mark_bar(cornerRadiusEnd=4).encode(
-            x=alt.X('suspect_score:Q', title='Suspect Score', scale=alt.Scale(domain=[0, 100])),
-            y=alt.Y('mmsi:N', sort='-x', title='Vessel (MMSI)'),
-            color=alt.Color('risk_label:N', scale=color_scale, legend=alt.Legend(title="Risk Tier")),
-            tooltip=['mmsi', 'suspect_score', 'risk_label']
-        ).properties(height=300)
-        st.altair_chart(chart, use_container_width=True)
-
-        st.markdown("###### Full vessel data table")
-        st.dataframe(
-            ranked[['mmsi', 'ship_type', 'speed_knots', 'distance_from_spill_km', 'ais_signal_gap', 'suspect_score', 'risk_label', 'prior_incidents']],
-            width='stretch',
-            column_config={
-                "mmsi": "MMSI (Vessel ID)",
-                "ship_type": "Type",
-                "speed_knots": "Speed (knots)",
-                "distance_from_spill_km": "Distance (km)",
-                "ais_signal_gap": "AIS Signal Gap",
-                "suspect_score": st.column_config.ProgressColumn("Suspect Score", min_value=0, max_value=100, format="%.1f"),
-                "risk_label": "Risk Tier",
-                "prior_incidents": "Prior Incidents Flagged",
-            }
-        )
-
-        if st.button("⬅ Back to Home", key="bottom_back_button"):
-            st.session_state.show_engine3_details = False
-            st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-       # ---- DATABASE SAVE ----
+    # ---- DATABASE SAVE ----
     save_status_placeholder = st.empty()
-    with st.spinner("Saving results to database..."):
-        success, result = save_pipeline_results(
-            spill_lat, spill_lon,
-            round(area_km2, 4) if area_km2 is not None else None,
-            image_path,
-            ranked
-        )
-    if success:
-        save_status_placeholder.success(f"✅ Results saved to database (Spill ID: {result})")
+    if spill_detected:
+        with st.spinner("Saving results to database..."):
+            success, result = save_pipeline_results(
+                spill_lat, spill_lon,
+                round(area_km2, 4),
+                image_path,
+                ranked
+            )
+        if success:
+            save_status_placeholder.success(f"✅ Results saved to database (Spill ID: {result})")
+        else:
+            save_status_placeholder.warning(f"⚠️ Database save failed: {result}")
+        time.sleep(2)
+        save_status_placeholder.empty()
     else:
-        save_status_placeholder.warning(f"⚠️ Database save failed: {result}")
-    time.sleep(2)
-    save_status_placeholder.empty()
+        save_status_placeholder.info("ℹ️ No spill detected — nothing saved to database for this run.")
+        time.sleep(1.5)
+        save_status_placeholder.empty()
 
 else:
     st.markdown("""
     <div style="text-align:center; padding: 4rem 1rem; color: #666;">
         <h3>Set spill parameters in the sidebar and click <b>Run ORCA Pipeline</b> to begin.</h3>
-        <p>Live satellite detection · Real oceanographic data · Real AIS vessel identity data</p>
+        <p>Rapid spill detection · Origin & drift forecasting · Vessel accountability — built for faster marine disaster response</p>
     </div>
     """, unsafe_allow_html=True)
